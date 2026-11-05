@@ -1472,13 +1472,10 @@ object SelfCheck {
     private const val VOICE_HOST = "openspeech.bytedance.com"
 
     /**
-     * Vertex's inference host — where both halves of the Google path go.
-     *
-     * Not the `wss://…/ws/…BidiGenerateContent` path and not a per-region
-     * host: the probe is a TCP connect, so the name that matters is the one
-     * that has to resolve and accept a connection.
+     * Google AI Studio / Gemini inference host — where Google ASR and TTS connect.
+     * The probe is a TCP connect on port 443.
      */
-    private const val VOICE_HOST_GOOGLE = "aiplatform.googleapis.com"
+    private const val VOICE_HOST_GOOGLE = "generativelanguage.googleapis.com"
 
     private const val VOICE_PORT = 443
     private const val PROBE_CONNECT_S = 6L

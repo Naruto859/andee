@@ -141,9 +141,9 @@ fun SettingsScreen(
                     NoKeyHint { v["brain"] = "codeflying" }
                     GlassField(st("settings_google_project"), v["google_project"].orEmpty(), { v["google_project"] = it }, hint = st("settings_google_project_hint"))
                     GlassField(st("settings_google_location"), v["google_location"].orEmpty(), { v["google_location"] = it }, hint = "asia-northeast1")
-                    GlassField(st("settings_google_asr_model"), v["google_asr_model"].orEmpty(), { v["google_asr_model"] = it }, hint = "gemini-live-2.5-flash-preview-native-audio")
-                    GlassField(st("settings_google_tts_model"), v["google_tts_model"].orEmpty(), { v["google_tts_model"] = it }, hint = "gemini-2.5-flash-preview-tts")
-                    GlassField(st("settings_google_base_url"), v["google_base_url"].orEmpty(), { v["google_base_url"] = it }, hint = "https://aiplatform.googleapis.com")
+                    GlassField(st("settings_google_asr_model"), v["google_asr_model"].orEmpty(), { v["google_asr_model"] = it }, hint = "gemini-2.5-flash-native-audio-latest")
+                    GlassField(st("settings_google_tts_model"), v["google_tts_model"].orEmpty(), { v["google_tts_model"] = it }, hint = "gemini-3.8-flash-tts")
+                    GlassField(st("settings_google_base_url"), v["google_base_url"].orEmpty(), { v["google_base_url"] = it }, hint = "https://generativelanguage.googleapis.com")
                     GlassField(st("settings_google_language"), v["google_language"].orEmpty(), { v["google_language"] = it }, hint = st("settings_google_language_hint"))
                     Note(st("settings_voice_google_note"))
                 } else {

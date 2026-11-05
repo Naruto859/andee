@@ -1195,9 +1195,8 @@ class EmotionBallRenderer {
                 // on the arc.
                 val k = state.bubble.coerceIn(0f, 1f)
                 for (i in 0..2) arcColor[i] = LOOK.eyeColor[i] + (sleepEye[i] - LOOK.eyeColor[i]) * k
-                GLES20.glUniform3fv(solidShader.uniform("uColor"), 1, arcColor, 0)
             } else {
-                GLES20.glUniform3fv(solidShader.uniform("uColor"), 1, LOOK.eyeColor, 0)
+                for (i in 0..2) arcColor[i] = LOOK.eyeColor[i]
             }
             // `⌣` for a closed lid, `⌢` for a laugh: the same arc turned half a
             // revolution, with its centre moved to the other side of the eye so the
@@ -1211,6 +1210,7 @@ class EmotionBallRenderer {
                     EYE_ARC_ROT_Z + flipRot + state.eyeLRotZ, arcL * state.lid * sc, arcL * sc,
                 )
                 GLES20.glUniformMatrix4fv(solidShader.uniform("uMVP"), 1, false, mvp, 0)
+                GLES20.glUniform3fv(solidShader.uniform("uColor"), 1, arcColor, 0)
                 eyeArcMesh.bind(aPos)
                 eyeArcMesh.draw()
             }
@@ -1220,6 +1220,7 @@ class EmotionBallRenderer {
                     EYE_ARC_ROT_Z + flipRot + state.eyeRRotZ, arcR * state.lid * sc, arcR * sc,
                 )
                 GLES20.glUniformMatrix4fv(solidShader.uniform("uMVP"), 1, false, mvp, 0)
+                GLES20.glUniform3fv(solidShader.uniform("uColor"), 1, arcColor, 0)
                 eyeArcMesh.bind(aPos)
                 eyeArcMesh.draw()
             }

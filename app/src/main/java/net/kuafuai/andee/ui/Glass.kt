@@ -173,8 +173,8 @@ object Glass {
     )
 
     private val NIGHT = Palette(
-        cardFrosted = "#99000000",
-        cardSolid = "#F2060608",
+        cardFrosted = "#CC1C1D20",
+        cardSolid = "#F81C1D20",
         hairline = "#2BFFFFFF",
         panel = "#0FFFFFFF",
         panelEdge = "#17FFFFFF",
@@ -190,11 +190,11 @@ object Glass {
         secondary = "#8F97A6",
         muted = "#5F6775",
         photoInk = "#98A0AE",
-        accent = "#7FA5FF",
-        tint = "#4C6FFF",
+        accent = "#22D3EE",
+        tint = "#FFC928",
         danger = "#FF6B6B",
         ok = "#4ADE80",
-        warn = "#FBBF24",
+        warn = "#FFC928",
     )
 
     /**

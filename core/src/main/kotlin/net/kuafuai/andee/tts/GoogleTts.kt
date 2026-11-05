@@ -7,13 +7,19 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Google text-to-speech — Gemini's `streamGenerateContent`, over plain HTTP
@@ -112,8 +118,15 @@ class GoogleTts(
         } }
     }
 
+    @Volatile private var activeWs: WebSocket? = null
+    @Volatile private var liveLatch: CountDownLatch? = null
+
     override fun cancel() {
         cancelled = true
+        activeWs?.close(1000, "cancel")
+        activeWs = null
+        liveLatch?.countDown()
+        liveLatch = null
         runCatching { call?.cancel() }
     }
 
@@ -151,17 +164,197 @@ class GoogleTts(
     }
 
     /**
+     * Resolves the REST SSE endpoint for Gemini TTS.
+     * Defaults to Google AI Studio's endpoint:
+     * `https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse&key={key}`
+     * Handles Vertex AI base URLs and custom proxies transparently.
+     */
+    fun ttsEndpointUrl(): String {
+        val model = config.googleTtsModel.trim().ifEmpty { DEFAULT_TTS_MODEL }
+        val base = config.googleBaseUrl.trim().trimEnd('/')
+        val url = when {
+            base.contains("aiplatform.googleapis.com") -> {
+                "$base/publishers/google/models/$model:streamGenerateContent?alt=sse"
+            }
+            base.isNotBlank() && !base.contains("generativelanguage.googleapis.com") -> {
+                if (base.endsWith(":streamGenerateContent")) {
+                    val sep = if (base.contains('?')) '&' else '?'
+                    "$base${sep}alt=sse"
+                } else if (base.contains("/models/")) {
+                    "$base:streamGenerateContent?alt=sse"
+                } else {
+                    "$base/v1beta/models/$model:streamGenerateContent?alt=sse"
+                }
+            }
+            else -> {
+                "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?alt=sse"
+            }
+        }
+        return appendKey(url)
+    }
+
+    private fun appendKey(rawUrl: String): String {
+        if (config.googleApiKey.isBlank() || rawUrl.contains("key=")) return rawUrl
+        val sep = if (rawUrl.contains('?')) '&' else '?'
+        return "$rawUrl${sep}key=${config.googleApiKey}"
+    }
+
+    /**
      * One sentence, streamed. Returns whether any audio came back.
      *
-     * The body is read line by line: the response is SSE (`data: {...}` per
-     * line) and chunk boundaries mean nothing, so a fixed buffer size would
-     * break on a long sentence.
+     * If the configured model is a native audio / Live bidirectional model
+     * (e.g. gemini-2.5-flash-native-audio-latest), uses WebSocket streaming
+     * BidiGenerateContent to speak without requiring Vertex AI.
+     * Otherwise, uses REST SSE `streamGenerateContent`.
      */
     private fun request(sentence: String): Boolean {
-        val url = config.googleBaseUrl.trimEnd('/') +
-            "/publishers/google/models/" + config.googleTtsModel +
-            ":streamGenerateContent?alt=sse&key=" + config.googleApiKey
+        val model = config.googleTtsModel.trim().ifEmpty { DEFAULT_TTS_MODEL }
+        if (isLiveAudioModel(model)) {
+            return requestLiveWs(sentence, model)
+        }
+        return requestRestSse(sentence)
+    }
 
+    private fun isLiveAudioModel(model: String): Boolean {
+        val lower = model.lowercase()
+        return lower.contains("native-audio") || lower.contains("bidi") || lower.contains("live")
+    }
+
+    private fun requestLiveWs(sentence: String, model: String): Boolean {
+        val key = config.googleApiKey.trim()
+        val base = config.googleBaseUrl.trim().trimEnd('/')
+        val wsUrl = when {
+            base.startsWith("ws://") || base.startsWith("wss://") -> appendKey(base)
+            base.contains("aiplatform.googleapis.com") -> appendKey(
+                "wss://aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent"
+            )
+            base.isNotBlank() && !base.contains("generativelanguage.googleapis.com") -> {
+                val wsBase = base.replace(Regex("^http://", RegexOption.IGNORE_CASE), "ws://")
+                    .replace(Regex("^https://", RegexOption.IGNORE_CASE), "wss://")
+                appendKey(if (wsBase.contains("/ws/")) wsBase else "$wsBase/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent")
+            }
+            else -> appendKey(DEFAULT_WS_LIVE_URL)
+        }
+
+        val setupModel = if (model.startsWith("models/")) model else "models/$model"
+        val voiceName = voiceFor(config.ttsSpeaker)
+        val setupPayload = JSONObject().put(
+            "setup",
+            JSONObject()
+                .put("model", setupModel)
+                .put(
+                    "generationConfig",
+                    JSONObject()
+                        .put("responseModalities", JSONArray().put("AUDIO"))
+                        .put(
+                            "speechConfig",
+                            JSONObject().put(
+                                "voiceConfig",
+                                JSONObject().put(
+                                    "prebuiltVoiceConfig",
+                                    JSONObject().put("voiceName", voiceName)
+                                )
+                            )
+                        )
+                )
+        ).toString()
+
+        val textTurnPayload = JSONObject().put(
+            "clientContent",
+            JSONObject()
+                .put(
+                    "turns",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("role", "user")
+                            .put(
+                                "parts",
+                                JSONArray().put(
+                                    JSONObject().put(
+                                        "text",
+                                        "Please read the following text aloud verbatim with natural expression, without answering or commenting:\n$sentence"
+                                    )
+                                )
+                            )
+                    )
+                )
+                .put("turnComplete", true)
+        ).toString()
+
+        val latch = CountDownLatch(1)
+        liveLatch = latch
+        val sawAudio = AtomicBoolean(false)
+
+        val listenerObj = object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                webSocket.send(setupPayload)
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) = handleWsMsg(text, webSocket)
+
+            override fun onMessage(webSocket: WebSocket, bytes: ByteString) =
+                handleWsMsg(bytes.string(Charsets.UTF_8), webSocket)
+
+            private fun handleWsMsg(raw: String, ws: WebSocket) {
+                if (cancelled) {
+                    latch.countDown()
+                    return
+                }
+                val obj = runCatching { JSONObject(raw) }.getOrNull() ?: return
+                val error = obj.optJSONObject("error")
+                if (error != null) {
+                    val msg = error.optString("message").ifBlank { raw.take(200) }
+                    Log.e(TAG, "TTS Live WS error: $msg")
+                    listener.onError("Gemini Live TTS: $msg")
+                    latch.countDown()
+                    return
+                }
+                if (obj.has("setupComplete")) {
+                    ws.send(textTurnPayload)
+                    return
+                }
+                val content = obj.optJSONObject("serverContent")
+                if (content != null) {
+                    val modelTurn = content.optJSONObject("modelTurn")
+                    if (modelTurn != null) {
+                        for (pcm in audioOf(modelTurn)) {
+                            sawAudio.set(true)
+                            listener.onAudio(pcm)
+                        }
+                    }
+                    if (content.optBoolean("turnComplete", false) || content.optBoolean("interrupted", false)) {
+                        latch.countDown()
+                    }
+                }
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                Log.e(TAG, "TTS Live WS failed: ${t.message}")
+                if (!cancelled) {
+                    listener.onError(t.message ?: "TTS Live WS failed")
+                }
+                latch.countDown()
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                latch.countDown()
+            }
+        }
+
+        val ws = http.newWebSocket(Request.Builder().url(wsUrl).build(), listenerObj)
+        activeWs = ws
+        try {
+            latch.await(30, TimeUnit.SECONDS)
+        } finally {
+            runCatching { ws.close(1000, "done") }
+            activeWs = null
+            liveLatch = null
+        }
+        return sawAudio.get()
+    }
+
+    private fun requestRestSse(sentence: String): Boolean {
+        val url = ttsEndpointUrl()
         val request = Request.Builder()
             .url(url)
             .header("Content-Type", "application/json; charset=utf-8")
@@ -183,18 +376,6 @@ class GoogleTts(
                     while (true) {
                         val line = reader.readLine() ?: break
                         if (cancelled) break
-                        // The shape of this stream is only ever learned from the
-                        // stream. The documentation says "audio" and does not
-                        // say whether that is raw PCM, which field it hides in,
-                        // or whether `alt=sse` is honoured at all — and the
-                        // reference gateway logs its first chunk for exactly
-                        // that reason. Skipping that line here cost a debugging
-                        // round: "returned no audio" is what a wrong guess about
-                        // the shape looks like from the outside.
-                        //
-                        // Logged *before* the `data:` test on purpose, so a
-                        // response that is not SSE at all — the case where every
-                        // later log line would be silent — still says something.
                         if (!firstChunkLogged && line.isNotBlank()) {
                             firstChunkLogged = true
                             Log.i(TAG, "first line of response: ${line.take(800)}")
@@ -231,10 +412,12 @@ class GoogleTts(
      */
     private fun audioOf(chunk: JSONObject): List<ByteArray> {
         val out = ArrayList<ByteArray>()
-        val parts = chunk.optJSONArray("candidates")
-            ?.optJSONObject(0)
-            ?.optJSONObject("content")
-            ?.optJSONArray("parts") ?: return out
+        val parts = chunk.optJSONArray("parts")
+            ?: chunk.optJSONArray("candidates")
+                ?.optJSONObject(0)
+                ?.optJSONObject("content")
+                ?.optJSONArray("parts")
+            ?: return out
 
         for (i in 0 until parts.length()) {
             val inline = parts.optJSONObject(i)?.optJSONObject("inlineData") ?: continue
@@ -332,8 +515,27 @@ class GoogleTts(
         /** Gemini speech output: signed 16-bit little-endian, mono. */
         private const val SAMPLE_RATE = 24_000
 
+        /** Default TTS model when not specified in config. */
+        const val DEFAULT_TTS_MODEL = "gemini-3.8-flash-tts"
+
+        /** Google AI Studio Live WebSocket endpoint for bidirectional audio models. */
+        const val DEFAULT_WS_LIVE_URL =
+            "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+
         /** Used when the ball's look names a speaker this build has no mapping for. */
-        const val DEFAULT_VOICE = "Kore"
+        const val DEFAULT_VOICE = "Erinome"
+
+        /**
+         * Supported Gemini prebuilt voices.
+         */
+        val PREBUILT_VOICES = setOf(
+            "Erinome", "Achernar", "Kore", "Aoede", "Leda", "Callirrhoe",
+            "Autonoe", "Despina", "Laomedeia", "Gacrux", "Pulcherrima",
+            "Vindemiatrix", "Sulafat", "Zephyr", "Puck", "Charon", "Fenrir",
+            "Orus", "Enceladus", "Iapetus", "Umbriel", "Algieba", "Algenib",
+            "Rasalgethi", "Alnilam", "Schedar", "Achird", "Zubenelgenubi",
+            "Sadachbia", "Sadaltager",
+        )
 
         /**
          * The character's voice, in Google's names.
@@ -350,15 +552,19 @@ class GoogleTts(
          * a worse outcome than a different voice.
          */
         private val VOICE_MAP = mapOf(
-            "zh_female_vv_uranus_bigtts" to "Leda",
+            "zh_female_vv_uranus_bigtts" to "Erinome",
             "zh_male_zhubajie_uranus_bigtts" to "Algenib",
             "zh_male_lubanqihao_uranus_bigtts" to "Fenrir",
             "zh_female_peiqi_uranus_bigtts" to "Zephyr",
             "zh_male_xionger_uranus_bigtts" to "Sulafat",
-            "zh_female_roumeinvyou_uranus_bigtts" to "Kore",
+            "zh_female_roumeinvyou_uranus_bigtts" to "Achernar",
         )
 
         /** [VOICE_MAP] with the default for anything it does not know. */
-        fun voiceFor(speaker: String): String = VOICE_MAP[speaker] ?: DEFAULT_VOICE
+        fun voiceFor(speaker: String): String {
+            if (speaker.isBlank()) return DEFAULT_VOICE
+            if (PREBUILT_VOICES.contains(speaker)) return speaker
+            return VOICE_MAP[speaker] ?: DEFAULT_VOICE
+        }
     }
 }

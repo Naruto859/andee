@@ -81,49 +81,24 @@ object VoiceConfig {
         const val VOICE_SYSTEM = "system"
 
         /**
-         * The Vertex endpoint, its Express-keyed surface.
-         *
-         * Not a region-scoped host: Express mode takes an API key and no
-         * project or location, which is what makes the Google path a single
-         * settings row instead of the five the reference gateway needs.
+         * Google AI Studio free API endpoint (zero credit card).
          */
-        const val DEFAULT_GOOGLE_BASE_URL = "https://aiplatform.googleapis.com/v1"
+        const val DEFAULT_GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com"
 
         /**
-         * The region the Live API session is opened in.
-         *
-         * The reference gateway measured both this and `global` handshaking
-         * successfully; a real region is the default because it is the one that
-         * cannot silently route a device somewhere it has no business being.
+         * The region the Live API session is opened in (when using Vertex AI).
          */
         const val DEFAULT_GOOGLE_LOCATION = "asia-northeast1"
 
         /**
-         * The transcription model, and **the `-live` in its name is the whole
-         * reason the Google listening path is a WebSocket**.
-         *
-         * Google's dedicated transcription models are served only by the Live
-         * API; the same id on `generateContent` is a 400 "is not supported in
-         * the generateContent API". So "no WebSocket" and "a real transcription
-         * model" are not both available, and this build takes the model — a
-         * general Gemini would have to be *told* to transcribe verbatim and
-         * could decide otherwise, on a transcript the meeting recorder writes
-         * to disk as the record of what was said.
-         *
-         * The `-preview` suffix is not optional either: without it the name is
-         * a 404. Both facts are the reference gateway's, measured.
+         * The transcription model for Gemini Live bidirectional audio streaming.
          */
-        const val DEFAULT_GOOGLE_ASR_MODEL = "gemini-3.5-transcribe-live-preview"
+        const val DEFAULT_GOOGLE_ASR_MODEL = "gemini-2.5-flash-native-audio-latest"
 
         /**
-         * The speaking model.
-         *
-         * The reference gateway records why this exact id and not the newer
-         * one: `3.8-flash-tts` exists on Gemini's own developer API but not on
-         * Vertex, where the speech models are 3.1 Flash TTS and below, and
-         * asking for 3.8 is a plain "model not found".
+         * The speaking model for Google TTS.
          */
-        const val DEFAULT_GOOGLE_TTS_MODEL = "gemini-3.1-flash-tts-preview"
+        const val DEFAULT_GOOGLE_TTS_MODEL = "gemini-3.8-flash-tts"
 
         /**
          * What the Google rows resolve to on a device where the user has typed
