@@ -83,11 +83,11 @@ object MacVoice {
         ttsSampleRate = Settings.get("tts_sample_rate").toIntOrNull()?.takeIf { it in 8_000..48_000 } ?: 24_000,
         voiceProvider = if (codeFlying != null) VoiceSettings.VOICE_HUOSHAN else Settings.voiceProvider(),
         googleApiKey = Settings.get("google_api_key"),
-        googleBaseUrl = Settings.get("google_base_url").ifEmpty { "https://aiplatform.googleapis.com" },
+        googleBaseUrl = Settings.get("google_base_url").ifEmpty { "https://generativelanguage.googleapis.com" },
         googleProject = Settings.get("google_project"),
         googleLocation = Settings.get("google_location").ifEmpty { "asia-northeast1" },
-        googleAsrModel = Settings.get("google_asr_model").ifEmpty { "gemini-live-2.5-flash-preview-native-audio" },
-        googleTtsModel = Settings.get("google_tts_model").ifEmpty { "gemini-2.5-flash-preview-tts" },
+        googleAsrModel = Settings.get("google_asr_model").ifEmpty { "gemini-2.5-flash-native-audio-latest" },
+        googleTtsModel = Settings.get("google_tts_model").ifEmpty { "gemini-3.8-flash-tts" },
         googleLanguage = Settings.get("google_language"),
     )
 

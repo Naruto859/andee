@@ -232,6 +232,9 @@ class GoogleAsr(
         io.shutdownNow()
     }
 
+    @Volatile
+    private var lastError: String? = null
+
     // ---- session ----
 
     private fun connect() {
@@ -239,8 +242,11 @@ class GoogleAsr(
             throw IllegalStateException("Google API key 未填写 (⚙ → 后端 → 本机)")
         }
 
+        val endpointUrl = liveEndpointUrl()
+        Log.i(TAG, "connecting to $endpointUrl with model ${modelPath()}")
+
         val socket = http.newWebSocket(
-            Request.Builder().url("$LIVE_URL?key=${config.googleApiKey}").build(),
+            Request.Builder().url(endpointUrl).build(),
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     webSocket.send(setupMessage())
@@ -255,19 +261,19 @@ class GoogleAsr(
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     // Release the setup wait as *failed*, so connect() does not
                     // sit out its whole timeout on a socket that is already gone.
+                    val msg = t.message ?: t.javaClass.simpleName
+                    lastError = msg
                     setup.countDown()
-                    fail(t.message ?: t.javaClass.simpleName)
+                    fail(msg)
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     setup.countDown()
-                    // A close we did not ask for is a turn that cannot produce
-                    // a transcript, so the failure is reported rather than
-                    // papered over with whatever has been heard so far: half of
-                    // what someone said, handed to the brain as if it were all
-                    // of it, is a worse outcome than being told the turn is
-                    // dead.
-                    if (!closed && !emitted.get()) {
+                    if (code != 1000) {
+                        val msg = if (reason.isNotBlank()) "ASR socket closed ($code: $reason)" else "ASR socket closed ($code)"
+                        lastError = msg
+                        fail(msg)
+                    } else if (!closed && !emitted.get()) {
                         Log.w(TAG, "socket closed early code=$code reason=$reason")
                         fail("ASR socket closed ($code)")
                     }
@@ -277,7 +283,11 @@ class GoogleAsr(
         ws = socket
 
         if (!setup.await(SETUP_TIMEOUT_S, TimeUnit.SECONDS)) {
-            throw IllegalStateException("ASR setup 超时 (检查 project number / location / 模型名)")
+            val err = lastError ?: "ASR setup 超时 (检查 API Key / 网络 / 模型名)"
+            throw IllegalStateException(err)
+        }
+        if (lastError != null) {
+            throw IllegalStateException(lastError!!)
         }
         // The latch is also counted down by a failure, so reaching here is not
         // proof of success — the error path has already said its piece.
@@ -311,8 +321,10 @@ class GoogleAsr(
         val error = d.optJSONObject("error")
         if (error != null) {
             val msg = error.optString("message").ifBlank { raw.take(200) }
+            val formatted = "ASR upstream: $msg"
+            lastError = formatted
             setup.countDown()
-            fail("ASR upstream: $msg")
+            fail(formatted)
             return
         }
 
@@ -564,6 +576,40 @@ class GoogleAsr(
      * a sentence in half at a breath, and that a parameter changed without a
      * measurement is the user's experience used as an experiment.
      */
+    /**
+     * Resolves the WebSocket endpoint for Gemini live ASR.
+     * Defaults to Google AI Studio's free endpoint (zero credit card required).
+     * Also supports custom WebSocket/HTTP ASR proxies or Vertex AI if configured.
+     */
+    fun liveEndpointUrl(): String {
+        if (config.asrEndpoint.startsWith("ws://") || config.asrEndpoint.startsWith("wss://")) {
+            return appendKey(config.asrEndpoint)
+        }
+        val base = config.googleBaseUrl.trim().trimEnd('/')
+        if (base.isNotBlank()) {
+            if (base.startsWith("ws://") || base.startsWith("wss://")) {
+                return appendKey(base)
+            }
+            if (base.contains("aiplatform.googleapis.com")) {
+                return appendKey("wss://aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent")
+            }
+            if (base.contains("generativelanguage.googleapis.com")) {
+                return appendKey(DEFAULT_LIVE_URL)
+            }
+            val wsBase = base.replace(Regex("^http://", RegexOption.IGNORE_CASE), "ws://")
+                .replace(Regex("^https://", RegexOption.IGNORE_CASE), "wss://")
+            val fullWs = if (wsBase.contains("/ws/")) wsBase else "$wsBase/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+            return appendKey(fullWs)
+        }
+        return appendKey(DEFAULT_LIVE_URL)
+    }
+
+    private fun appendKey(rawUrl: String): String {
+        if (config.googleApiKey.isBlank() || rawUrl.contains("key=")) return rawUrl
+        val sep = if (rawUrl.contains('?')) '&' else '?'
+        return "$rawUrl${sep}key=${config.googleApiKey}"
+    }
+
     private fun setupMessage(): String {
         val languages = JSONArray()
         if (config.googleLanguage.isNotBlank()) languages.put(config.googleLanguage)
@@ -572,7 +618,7 @@ class GoogleAsr(
             .put("model", modelPath())
             .put(
                 "generationConfig",
-                JSONObject().put("responseModalities", JSONArray().put("TEXT")),
+                JSONObject().put("responseModalities", JSONArray().put("AUDIO")),
             )
             .put(
                 "inputAudioTranscription",
@@ -603,30 +649,32 @@ class GoogleAsr(
         .toString()
 
     /**
-     * The full resource path, or the bare name when no project is configured.
-     *
-     * Bare is not a working configuration — the gateway's note is that it comes
-     * back as a permission error naming a project nobody asked for — but
-     * inventing a path around an empty field would replace a clear upstream
-     * error with a confusing local one.
+     * Resolves the model path. For Google AI Studio (default), models are identified
+     * as "models/{model_name}" without requiring a GCP project number or credit card.
+     * When Vertex AI is explicitly targeted with a project number, formats the full
+     * Vertex AI resource path.
      */
-    private fun modelPath(): String {
-        val project = config.googleProject
-        if (project.isBlank()) return config.googleAsrModel
-        return "projects/$project/locations/${config.googleLocation}" +
-            "/publishers/google/models/${config.googleAsrModel}"
+    fun modelPath(): String {
+        val model = config.googleAsrModel.trim().ifEmpty { DEFAULT_ASR_MODEL }
+        val project = config.googleProject.trim()
+        val isVertex = liveEndpointUrl().contains("aiplatform.googleapis.com")
+        if (isVertex && project.isNotBlank()) {
+            return "projects/$project/locations/${config.googleLocation.ifEmpty { "asia-northeast1" }}" +
+                "/publishers/google/models/$model"
+        }
+        return if (model.startsWith("models/")) model else "models/$model"
     }
 
     companion object {
         private const val TAG = "GoogleAsr"
 
         /**
-         * The Live API endpoint. `v1beta1` is not a typo and not a preference:
-         * it is the version that serves `BidiGenerateContent`.
+         * Google AI Studio free Live API bidirectional streaming endpoint (zero credit card).
          */
-        private const val LIVE_URL =
-            "wss://aiplatform.googleapis.com/ws/" +
-                "google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent"
+        const val DEFAULT_LIVE_URL =
+            "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+
+        const val DEFAULT_ASR_MODEL = "gemini-2.5-flash-native-audio-latest"
 
         private const val SAMPLE_RATE = 16_000
 

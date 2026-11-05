@@ -1113,23 +1113,17 @@ val BAJIE = BallLook(
  */
 val ANDEE = BallLook(
     name = "andee",
-    bodyBase = floatArrayOf(0.250f, 0.460f, 0.870f),
-    bodyTint = 0.10f,
+    // Curated @uxui_shrut aesthetic: #1C1D20 sleek dark base with vibrant accents (#FFC928 / #22D3EE).
+    bodyBase = floatArrayOf(0.110f, 0.114f, 0.125f),
+    bodyTint = 0.12f,
     bodyAlbedo = 1.00f,
-    bodyGrad = 0.26f,
-    bodyAmb = 0.94f,
-    bodyDiff = 0.20f,
-    // Soft, like the picture — a velvety plush, not lacquer. Low enough that
-    // the crown does not grow a white blob that would fight the catchlights.
-    bodyGloss = 0.05f,
+    bodyGrad = 0.28f,
+    bodyAmb = 0.92f,
+    bodyDiff = 0.25f,
+    bodyGloss = 0.08f,
     bodyScale = 0.870f,
     faceZ = 0.876f,
     eyeX = 0.345f,
-    // Raised 0.12 from the picture's own −0.03, after the horns were raised twice:
-    // with horns that tall the sphere read as a forehead dome with a face stuck on
-    // the bottom of it — 1.7 eye-diameters of blank above the eyes against the
-    // picture's 1.4. Eyes, mouth, cheeks and the sleep bubble all moved together so
-    // the face is the same face, one notch higher.
     eyeY = 0.070f,
     eyeRadius = 0.215f,
     eyeCyl = 0.012f,
@@ -1137,52 +1131,36 @@ val ANDEE = BallLook(
     mouthTube = 0.028f,
     mouthY = -0.285f,
     mouthThick = 0.140f,
-    eyeColor = floatArrayOf(0.035f, 0.080f, 0.280f),
-    pupilR = 0f,
-    glintR = 0.065f,
-    glint2R = 0.050f,
-    glint2Color = floatArrayOf(0.45f, 0.70f, 1.00f),
+    eyeColor = floatArrayOf(0.96f, 0.98f, 1.00f),
+    pupilR = 0.095f,
+    glintR = 0.055f,
+    glint2R = 0.038f,
+    glint2Color = floatArrayOf(0.133f, 0.827f, 0.933f), // #22D3EE electric cyan catchlight
     gestures = true,
-    // 0.09 now, from 0.17: the eyes already sit 0.12 higher, so the same lift would
-    // put them well clear of the ledge and leave the peeking ball with no forehead.
     clingLift = 0.16f,
     smileRoll = 0f,
-    mouthInk = floatArrayOf(0.025f, 0.045f, 0.140f),
+    mouthInk = floatArrayOf(1.000f, 0.788f, 0.157f), // #FFC928 vibrant gold accent smile
     arcScale = 1.5f,
     scanGain = 0.12f,
-    rimTint = floatArrayOf(1.0f, 0.62f, 0.50f),
+    rimTint = floatArrayOf(0.133f, 0.827f, 0.933f), // #22D3EE vibrant electric cyan halo
     rimTintMix = 1.0f,
-    // Light droplet on a mid-dark body, the same side of the split as [BEAR].
     bubbleX = 0.085f,
     bubbleY = 0.070f,
     bubbleR = 0.085f,
-    bubbleColor = floatArrayOf(0.88f, 0.93f, 1.00f),
+    bubbleColor = floatArrayOf(0.133f, 0.827f, 0.933f), // #22D3EE vibrant cyan bubble
     bubblePow = 3.0f,
     bubbleShine = 26f,
-    bubbleInner = 0.10f,
+    bubbleInner = 0.12f,
     mouthDeep = true,
-    // The picture has no cheeks. Kept faintly so the happy moods still flush.
-    blushColor = floatArrayOf(1f, 0.55f, 0.75f),
-    blushAlpha = 0.10f,
+    blushColor = floatArrayOf(1.000f, 0.788f, 0.157f), // #FFC928 warm vibrant gold blush
+    blushAlpha = 0.22f,
     blushBlendNormal = true,
     blushSize = 0.40f,
     blushX = 0.440f,
     blushY = -0.010f,
-    // A light rim, like the imp's and bear's: a dark outline on a mid-dark body
-    // is a smudge.
     rimDark = false,
-    rimGain = 1.30f,
-    rimPow = 3.0f,
-
-    // See the class note: fitted to the picture's horn, then raised twice on request
-    // — the second time (0.477 → 0.53, tilt 50 → 38, bend −80 → −62, a longer horn)
-    // makes them stand more upright as well as higher: the tip goes from y 0.89 to
-    // about 1.02 and the sweep sideways shrinks. Base buried at (0.40, 0.53) so only
-    // the curl shows.
-    // The tip blushes toward the coral of the rim and the props. Blue and peach
-    // mixed half and half is a dull lilac, so it goes nearly all the way (0.9) over
-    // the last ~40% of the horn: the very end is peach, and only the short stretch
-    // between is the in-between colour.
+    rimGain = 1.35f,
+    rimPow = 3.2f,
     hornH = 0.420f,
     hornR = 0.265f,
     hornX = 0.400f,
@@ -1191,13 +1169,12 @@ val ANDEE = BallLook(
     hornTilt = 30f,
     hornBend = -50f,
     hornTaper = 0.9f,
-    hornShade = 1.00f,
-    hornTipColor = floatArrayOf(1.00f, 0.70f, 0.58f),
-    hornTipMix = 0.00f,
-    // 1.5 rather than 1: measured on the device, a wiggle at 1 moves the horns about
-    // 10 px against the eyes on a 420 dp ball, which is about 3° and at the real
-    // 168 dp size is a pixel and a half — present, and not visible.
+    hornShade = 0.95f,
+    hornTipColor = floatArrayOf(1.000f, 0.788f, 0.157f), // #FFC928 warm gold horn tip
+    hornTipMix = 0.40f,
     hornWobble = 1.5f,
+    sleepEyeColor = floatArrayOf(0.18f, 0.20f, 0.24f),
+    voice = "Erinome",
 )
 
 /**
